@@ -204,10 +204,11 @@ const STORAGE_KEY   = 'sg3j_v2';
 const SUBMIT_URL    = 'https://script.google.com/macros/s/AKfycbwiaxJ8VU6Faa7IXUzx5NRNJtNiyJj5JNAAd-Z5BKQ4GX3dDMDSOPr2rBnDN6L8eodx/exec';
 
 // ── Session state ─────────────────────────────────────────────────────────────
-let username    = '';
-let currentIdx  = 0;
-let answers     = [];      // [{pairIdx, id1, id2, choice, elapsed}]
-let timerStart  = null;
+let username         = '';
+let currentIdx       = 0;
+let answers          = [];      // [{pairIdx, id1, id2, choice, elapsed}]
+let timerStart       = null;
+let lastSubmittedIdx = 0;       // how many answers have already been sent to server
 
 // ── Utility: get segment display text ────────────────────────────────────────
 function getSegmentText(seg_id) {
@@ -239,7 +240,8 @@ function storageKey()  { return STORAGE_KEY + '_' + username; }
 function saveState() {
   localStorage.setItem(storageKey(), JSON.stringify({
     currentIdx,
-    answers
+    answers,
+    lastSubmittedIdx
   }));
 }
 
@@ -248,8 +250,9 @@ function loadState() {
   if (!raw) return false;
   try {
     const s = JSON.parse(raw);
-    currentIdx = s.currentIdx || 0;
-    answers    = s.answers    || [];
+    currentIdx       = s.currentIdx       || 0;
+    answers          = s.answers          || [];
+    lastSubmittedIdx = s.lastSubmittedIdx || 0;
     return true;
   } catch(e) { return false; }
 }
@@ -367,13 +370,14 @@ function showDone() {
 
 // ── Server auto-submission ───────────────────────────────────────────────────────
 async function submitToServer(statusElemId) {
-  if (!answers.length) return;
+  const newAnswers = answers.slice(lastSubmittedIdx);  // only unsent records
+  if (!newAnswers.length) return;
   const statusEl = document.getElementById(statusElemId);
   if (statusEl) statusEl.textContent = '⏳ 서버에 전송 중...';
   const payload = {
     username,
     submitted_at: new Date().toISOString(),
-    rows: answers.map(a => ({
+    rows: newAnswers.map(a => ({
       username, pairIdx: a.pairIdx,
       id1: a.id1, id2: a.id2,
       harder: a.harder, easier: a.easier,
@@ -382,9 +386,11 @@ async function submitToServer(statusElemId) {
   };
   try {
     await fetch(SUBMIT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+    lastSubmittedIdx = answers.length;  // advance pointer on success
+    saveState();
     if (statusEl) statusEl.innerHTML =
-      '<span style="color:#27ae60;">✓ 서버 전송 완료 (' + answers.length + '건)</span>';
-    setServerStatus('✓ ' + answers.length + '건 전송됨');
+      '<span style="color:#27ae60;">✓ 서버 전송 완료 (+' + newAnswers.length + '건, 누적 ' + answers.length + '건)</span>';
+    setServerStatus('✓ 누적 ' + answers.length + '건 전송됨');
   } catch(err) {
     if (statusEl) statusEl.innerHTML =
       '<span style="color:#e74c3c;">⚠ 전송 실패 – CSV 백업을 저장하세요</span>';
